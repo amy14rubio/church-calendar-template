@@ -1,0 +1,30 @@
+rules_version = '2';
+
+// Cross-service rules (Storage reading Firestore) — see
+// https://firebase.google.com/docs/rules/rules-and-auth#cross-service_rules_authorization.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Size/content-type limits mirror the client's own checks (see
+    // profilePicture.ts) — those alone are a UX nicety, not security,
+    // since any direct API call bypasses whatever the app's own JS
+    // checks before calling uploadBytes. request.resource is only
+    // populated on create/update, not delete, so delete needs its own
+    // clause rather than sharing one blanket `write`.
+    // One object per user (path is just their uid — see
+    // src/lib/profilePicture.ts), so re-uploading overwrites the old
+    // photo instead of accumulating orphaned files. Readable by anyone
+    // signed in, since a profile picture shows up in shared UI (the
+    // profile menu, attendee lists) regardless of who's viewing.
+    match /profile-pictures/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if isSignedIn() && request.auth.uid == uid;
+    }
+  }
+}
